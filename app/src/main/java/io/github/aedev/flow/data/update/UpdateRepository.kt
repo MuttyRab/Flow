@@ -19,8 +19,6 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val STABLE_RELEASE_API = "https://api.github.com/repos/Flow-Tube/Flow/releases/latest"
-private const val NIGHTLY_RELEASE_API = "https://api.github.com/repos/Flow-Tube/Flow/releases/tags/nightly"
 private const val NIGHTLY_CHANNEL = "nightly"
 private const val GITHUB_JSON = "application/vnd.github+json"
 
@@ -99,7 +97,7 @@ class UpdateRepository
                     val request =
                         Request
                             .Builder()
-                            .url(if (isNightly) NIGHTLY_RELEASE_API else STABLE_RELEASE_API)
+                            .url(UpdateApiUrls.forChannel(BuildConfig.UPDATE_REPOSITORY, isNightly))
                             .header("Accept", GITHUB_JSON)
                             .cacheControl(CacheControl.FORCE_NETWORK)
                             .build()
