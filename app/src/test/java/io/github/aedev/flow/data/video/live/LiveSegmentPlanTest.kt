@@ -36,7 +36,8 @@ class LiveSegmentPlanTest {
 
     @Test
     fun media3ParsesLiveTransportStreamSequence() {
-        val fixture = """
+        val fixture =
+            """
             #EXTM3U
             #EXT-X-VERSION:3
             #EXT-X-TARGETDURATION:4
@@ -47,26 +48,29 @@ class LiveSegmentPlanTest {
             second.ts
             #EXTINF:4.0,
             third.ts
-        """.trimIndent()
-        val playlist = HlsPlaylistParser().parse(
-            Uri.parse("https://example.org/live/index.m3u8"),
-            fixture.byteInputStream(),
-        ) as HlsMediaPlaylist
+            """.trimIndent()
+        val playlist =
+            HlsPlaylistParser().parse(
+                Uri.parse("https://example.org/live/index.m3u8"),
+                fixture.byteInputStream(),
+            ) as HlsMediaPlaylist
         assertThat(playlist.mediaSequence).isEqualTo(900L)
         assertThat(playlist.segments.map { it.url }).containsExactly("first.ts", "second.ts", "third.ts").inOrder()
         assertThat(LiveSegmentPlan.nextIndices(playlist.mediaSequence, playlist.segments.size, 901L))
-            .containsExactly(1, 2).inOrder()
+            .containsExactly(1, 2)
+            .inOrder()
     }
 
     @Test
     fun media3SeparatesMultivariantFromMediaPlaylist() {
-        val fixture = """
+        val fixture =
+            """
             #EXTM3U
             #EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360
             low.m3u8
             #EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=1280x720
             high.m3u8
-        """.trimIndent()
+            """.trimIndent()
         val result = HlsPlaylistParser().parse(Uri.parse("https://example.org/live/master.m3u8"), fixture.byteInputStream())
         assertThat(result).isInstanceOf(HlsMultivariantPlaylist::class.java)
         assertThat((result as HlsMultivariantPlaylist).variants).hasSize(2)

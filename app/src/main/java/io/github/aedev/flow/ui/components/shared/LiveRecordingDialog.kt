@@ -79,13 +79,19 @@ internal fun LiveRecordingDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
                     if (recordingThis) {
-                        Button(onClick = { LiveRecordingService.stop(context); onDismiss() }) {
+                        Button(onClick = {
+                            LiveRecordingService.stop(context)
+                            onDismiss()
+                        }) {
                             Text(stringResource(R.string.live_recording_stop_save))
                         }
                     } else {
                         Button(
                             enabled = !state.busy,
-                            onClick = { LiveRecordingService.start(context, video.id, video.title); onDismiss() },
+                            onClick = {
+                                LiveRecordingService.start(context, video.id, video.title)
+                                onDismiss()
+                            },
                         ) {
                             Text(stringResource(R.string.live_recording_start))
                         }

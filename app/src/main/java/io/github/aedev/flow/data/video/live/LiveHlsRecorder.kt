@@ -3,8 +3,8 @@ package io.github.aedev.flow.data.video.live
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.UriUtil
-import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
 import io.github.aedev.flow.network.ProxyAwareClient
 import io.github.aedev.flow.player.stream.InnerTubeVideoStreamExtractor
@@ -40,80 +40,84 @@ internal class LiveHlsRecorder(
         }
     private val client: OkHttpClient get() = proxyClient.get()
 
-    suspend fun record(): File = withContext(Dispatchers.IO) {
-        require(workDir.isDirectory || workDir.mkdirs()) { "Cannot create recording folder" }
-        val output = File(workDir, "capture.ts")
-        val part = File(workDir, "segment.part")
-        var manifestUrl = freshManifest()
-        var sequence: Long? = null
-        var discontinuity: Int? = null
-        var durationUs = 0L
-        var errors = 0
-        var roundsWithoutNew = 0
-        var segmentCount = 0
-        try {
-            while (!stopRequested() && output.length() < MAX_BYTES && durationUs < MAX_DURATION_US) {
-                try {
-                    val (playlistUrl, playlist) = loadMediaPlaylist(manifestUrl)
-                    val next = sequence ?: LiveSegmentPlan.startingSequence(playlist.mediaSequence, playlist.segments.size)
-                    val newIndices = LiveSegmentPlan.nextIndices(playlist.mediaSequence, playlist.segments.size, next)
-                    var nextSequence = next
-                    var recorded = false
-                    for (index in newIndices) {
-                        if (stopRequested()) break
-                        val segment = playlist.segments[index]
-                        val sequenceNumber = playlist.mediaSequence + index
-                        if (sequenceNumber != nextSequence) throw IOException("Missing HLS segment in live window")
-                        if (segment.hasGapTag) throw IOException("Live stream contains an unavailable segment")
-                        if (segment.drmInitData != null || segment.fullSegmentEncryptionKeyUri != null ||
-                            segment.encryptionIV != null || segment.initializationSegment != null
-                        ) throw UnsupportedStream("Encrypted or fragmented-MP4 HLS is not supported")
-                        val segmentDiscontinuity = playlist.discontinuitySequence + segment.relativeDiscontinuitySequence
-                        if (discontinuity != null && discontinuity != segmentDiscontinuity) {
-                            throw UnsupportedStream("HLS encoding changed during recording")
+    suspend fun record(): File =
+        withContext(Dispatchers.IO) {
+            require(workDir.isDirectory || workDir.mkdirs()) { "Cannot create recording folder" }
+            val output = File(workDir, "capture.ts")
+            val part = File(workDir, "segment.part")
+            var manifestUrl = freshManifest()
+            var sequence: Long? = null
+            var discontinuity: Int? = null
+            var durationUs = 0L
+            var errors = 0
+            var roundsWithoutNew = 0
+            var segmentCount = 0
+            try {
+                while (!stopRequested() && output.length() < MAX_BYTES && durationUs < MAX_DURATION_US) {
+                    try {
+                        val (playlistUrl, playlist) = loadMediaPlaylist(manifestUrl)
+                        val next = sequence ?: LiveSegmentPlan.startingSequence(playlist.mediaSequence, playlist.segments.size)
+                        val newIndices = LiveSegmentPlan.nextIndices(playlist.mediaSequence, playlist.segments.size, next)
+                        var nextSequence = next
+                        var recorded = false
+                        for (index in newIndices) {
+                            if (stopRequested()) break
+                            val segment = playlist.segments[index]
+                            val sequenceNumber = playlist.mediaSequence + index
+                            if (sequenceNumber != nextSequence) throw IOException("Missing HLS segment in live window")
+                            if (segment.hasGapTag) throw IOException("Live stream contains an unavailable segment")
+                            if (segment.drmInitData != null || segment.fullSegmentEncryptionKeyUri != null ||
+                                segment.encryptionIV != null || segment.initializationSegment != null
+                            ) {
+                                throw UnsupportedStream("Encrypted or fragmented-MP4 HLS is not supported")
+                            }
+                            val segmentDiscontinuity = playlist.discontinuitySequence + segment.relativeDiscontinuitySequence
+                            if (discontinuity != null && discontinuity != segmentDiscontinuity) {
+                                throw UnsupportedStream("HLS encoding changed during recording")
+                            }
+                            fetchToFile(UriUtil.resolve(playlistUrl, segment.url), segment.byteRangeOffset, segment.byteRangeLength, part)
+                            if (!isTransportStream(part)) throw UnsupportedStream("This livestream is not MPEG-TS HLS")
+                            if (output.length() + part.length() > MAX_BYTES) break
+                            java.io.FileOutputStream(output, true).use { out -> part.inputStream().use { it.copyTo(out) } }
+                            part.delete()
+                            discontinuity = segmentDiscontinuity
+                            durationUs += segment.durationUs
+                            segmentCount++
+                            nextSequence = sequenceNumber + 1
+                            sequence = nextSequence
+                            recorded = true
+                            onProgress(durationUs / 1_000_000L, output.length())
                         }
-                        fetchToFile(UriUtil.resolve(playlistUrl, segment.url), segment.byteRangeOffset, segment.byteRangeLength, part)
-                        if (!isTransportStream(part)) throw UnsupportedStream("This livestream is not MPEG-TS HLS")
-                        if (output.length() + part.length() > MAX_BYTES) break
-                        java.io.FileOutputStream(output, true).use { out -> part.inputStream().use { it.copyTo(out) } }
-                        part.delete()
-                        discontinuity = segmentDiscontinuity
-                        durationUs += segment.durationUs
-                        segmentCount++
-                        nextSequence = sequenceNumber + 1
-                        sequence = nextSequence
-                        recorded = true
-                        onProgress(durationUs / 1_000_000L, output.length())
+                        errors = 0
+                        roundsWithoutNew = if (recorded) 0 else roundsWithoutNew + 1
+                        if (playlist.hasEndTag) break
+                        if (roundsWithoutNew > MAX_IDLE_POLLS) throw IOException("Livestream stopped producing segments")
+                        delay((playlist.targetDurationUs / 2_000L).coerceIn(1_000L, 7_000L))
+                    } catch (e: UnsupportedStream) {
+                        throw e
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (stopRequested()) break
+                        errors++
+                        if (errors >= MAX_RETRIES) {
+                            if (segmentCount == 0) throw IOException("Cannot retrieve live HLS segments", e)
+                            break // save the playable portion recorded before network failure
+                        }
+                        delay((errors * 1_500L).coerceAtMost(8_000L))
+                        manifestUrl = runCatching { freshManifest() }.getOrDefault(manifestUrl) // refresh expired signed URLs
                     }
-                    errors = 0
-                    roundsWithoutNew = if (recorded) 0 else roundsWithoutNew + 1
-                    if (playlist.hasEndTag) break
-                    if (roundsWithoutNew > MAX_IDLE_POLLS) throw IOException("Livestream stopped producing segments")
-                    delay((playlist.targetDurationUs / 2_000L).coerceIn(1_000L, 7_000L))
-                } catch (e: UnsupportedStream) {
-                    throw e
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (stopRequested()) break
-                    errors++
-                    if (errors >= MAX_RETRIES) {
-                        if (segmentCount == 0) throw IOException("Cannot retrieve live HLS segments", e)
-                        break // save the playable portion recorded before network failure
-                    }
-                    delay((errors * 1_500L).coerceAtMost(8_000L))
-                    manifestUrl = runCatching { freshManifest() }.getOrDefault(manifestUrl) // refresh expired signed URLs
                 }
+            } finally {
+                part.delete()
             }
-        } finally {
-            part.delete()
+            if (segmentCount == 0 || output.length() == 0L) throw IOException("No playable live segments captured")
+            output
         }
-        if (segmentCount == 0 || output.length() == 0L) throw IOException("No playable live segments captured")
-        output
-    }
 
     private suspend fun freshManifest(): String =
-        InnerTubeVideoStreamExtractor.extract(videoId)
+        InnerTubeVideoStreamExtractor
+            .extract(videoId)
             ?.takeIf { it.isLive }
             ?.liveHlsUrl
             ?.takeIf { it.startsWith("https://") }
@@ -125,13 +129,20 @@ internal class LiveHlsRecorder(
             val data = downloadBytes(current)
             val playlist = HlsPlaylistParser().parse(Uri.parse(current), data.inputStream())
             when (playlist) {
-                is HlsMediaPlaylist -> return current to playlist
+                is HlsMediaPlaylist -> {
+                    return current to playlist
+                }
+
                 is HlsMultivariantPlaylist -> {
-                    val best = playlist.variants.maxWithOrNull(compareBy({ it.format.height }, { it.format.bitrate }))
-                        ?: throw UnsupportedStream("HLS master playlist has no variants")
+                    val best =
+                        playlist.variants.maxWithOrNull(compareBy({ it.format.height }, { it.format.bitrate }))
+                            ?: throw UnsupportedStream("HLS master playlist has no variants")
                     current = UriUtil.resolve(playlist.baseUri, best.url.toString())
                 }
-                else -> throw UnsupportedStream("Unsupported HLS playlist")
+
+                else -> {
+                    throw UnsupportedStream("Unsupported HLS playlist")
+                }
             }
         }
         throw UnsupportedStream("Too many nested HLS playlists")
@@ -147,10 +158,19 @@ internal class LiveHlsRecorder(
         }
     }
 
-    private fun fetchToFile(url: String, offset: Long, length: Long, destination: File) {
-        val request = Request.Builder().url(url).apply {
-            if (length >= 0) header("Range", "bytes=$offset-${offset + length - 1}")
-        }.build()
+    private fun fetchToFile(
+        url: String,
+        offset: Long,
+        length: Long,
+        destination: File,
+    ) {
+        val request =
+            Request
+                .Builder()
+                .url(url)
+                .apply {
+                    if (length >= 0) header("Range", "bytes=$offset-${offset + length - 1}")
+                }.build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful || (length >= 0 && response.code != 206)) {
                 throw IOException("Live segment HTTP ${response.code}")
@@ -180,7 +200,9 @@ internal class LiveHlsRecorder(
         }
     }
 
-    internal class UnsupportedStream(message: String) : IOException(message)
+    internal class UnsupportedStream(
+        message: String,
+    ) : IOException(message)
 
     private companion object {
         const val MAX_PLAYLIST_BYTES = 2 * 1024 * 1024
