@@ -100,7 +100,12 @@ class LiveRecordingService : Service() {
                         publishState(state.value.copy(status = LiveRecordingState.Status.SAVED, details = location))
                         folder.deleteRecursively()
                     } catch (e: CancellationException) {
-                        publishState(state.value.copy(status = LiveRecordingState.Status.FAILED, details = "Interrupted; captured segments retained"))
+                        publishState(
+                            state.value.copy(
+                                status = LiveRecordingState.Status.FAILED,
+                                details = "Interrupted; captured segments retained",
+                            ),
+                        )
                         throw e
                     } catch (e: Exception) {
                         val partial = File(folder, "capture.ts")
@@ -111,7 +116,9 @@ class LiveRecordingService : Service() {
                         publishState(
                             state.value.copy(
                                 status = LiveRecordingState.Status.FAILED,
-                                details = listOfNotNull(e.message, salvaged?.let { "Partial recording saved: $it" }).joinToString(". "),
+                                details =
+                                    listOfNotNull(e.message, salvaged?.let { "Partial recording saved: $it" })
+                                        .joinToString(". "),
                             ),
                         )
                     } finally {
