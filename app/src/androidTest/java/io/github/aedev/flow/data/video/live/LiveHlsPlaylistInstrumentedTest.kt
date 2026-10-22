@@ -6,7 +6,8 @@ import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.google.common.truth.Truth.assertThat
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -31,8 +32,8 @@ class LiveHlsPlaylistInstrumentedTest {
                 Uri.parse("https://example.org/live/index.m3u8"),
                 fixture.byteInputStream(),
             ) as HlsMediaPlaylist
-        assertThat(playlist.mediaSequence).isEqualTo(900L)
-        assertThat(playlist.segments.map { it.url }).containsExactly("first.ts", "second.ts").inOrder()
+        assertEquals(900L, playlist.mediaSequence)
+        assertEquals(listOf("first.ts", "second.ts"), playlist.segments.map { it.url })
     }
 
     @Test
@@ -46,7 +47,7 @@ class LiveHlsPlaylistInstrumentedTest {
             high.m3u8
             """.trimIndent()
         val result = HlsPlaylistParser().parse(Uri.parse("https://example.org/live/master.m3u8"), fixture.byteInputStream())
-        assertThat(result).isInstanceOf(HlsMultivariantPlaylist::class.java)
-        assertThat((result as HlsMultivariantPlaylist).variants).hasSize(2)
+        assertTrue(result is HlsMultivariantPlaylist)
+        assertEquals(2, (result as HlsMultivariantPlaylist).variants.size)
     }
 }
