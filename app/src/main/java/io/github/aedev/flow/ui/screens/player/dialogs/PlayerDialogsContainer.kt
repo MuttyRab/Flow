@@ -47,6 +47,7 @@ internal fun PlayerDialogsContainer(
                     video = video,
                     currentPlayingHeight = playerState.effectiveQuality,
                     subtitles = playerState.availableSubtitles,
+                    isLive = uiState.isLive || video.isLive,
                     onDismiss = { screenState.closeSheet() },
                 )
             }
