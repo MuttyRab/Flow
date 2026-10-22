@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_launcher_name" translatable="false">Flow Nightly</string>
+    <!-- Nightly/personal builds only: keep upstream stable build branding untouched. -->
+    <string name="app_name">My Flow</string>
+    <string name="app_launcher_name" translatable="false">My Flow</string>
 </resources>

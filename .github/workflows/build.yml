@@ -336,6 +336,21 @@ jobs:
           cp "$src" "dist-nightly/flow-nightly-${GITHUB_RUN_NUMBER}.apk"
           (cd dist-nightly && sha256sum flow-nightly-*.apk | tee checksums.txt)
 
+      # The nightly build is a separate personal app; verify the installed label
+      # and package inside the actual APK, not just its source resource.
+      - name: Verify My Flow APK branding
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -euo pipefail
+          src=app/build/outputs/apk/github/nightly/app-github-universal-nightly.apk
+          test -f "$src"
+          aapt2=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 -type f | sort -V | tail -1)
+          test -n "$aapt2"
+          "$aapt2" dump badging "$src" > my-flow-badging.txt
+          grep -Fx "application-label:'My Flow'" my-flow-badging.txt
+          grep -F "package: name='io.github.aedev.flow.nightly.mutty'" my-flow-badging.txt
+          echo 'My Flow launcher label and personal package verified.'
+
       - name: Report individual APK sizes
         shell: bash
         run: |
