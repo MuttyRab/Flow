@@ -61,6 +61,8 @@ android {
         versionName = "3.0.0"
 
         buildConfigField("int", "NIGHTLY_RUN", "0")
+        // Personal fork builds must never download upstream Flow updates.
+        buildConfigField("String", "UPDATE_REPOSITORY", "\"MuttyRab/Flow\"")
         buildConfigField("String", "APP_LANGUAGE_TAGS", "\"${(listOf("en") + translatedLocaleTags()).joinToString(",")}\"")
         // Last.fm keys come from the CI secrets; builds without them ask the viewer for their own key.
         buildConfigField("String", "LASTFM_API_KEY", "\"${secretValue("lastfmApiKey", "lastfm.apiKey", "LASTFM_API_KEY")}\"")
@@ -178,7 +180,8 @@ android {
         // because initWith copies release as it stands at this point.
         create("nightly") {
             initWith(getByName("release"))
-            applicationIdSuffix = ".nightly"
+            // Install alongside official Flow Nightly, whose release key differs.
+            applicationIdSuffix = ".nightly.mutty"
             versionNameSuffix = "-nightly"
             matchingFallbacks += "release"
             buildConfigField("String", "UPDATE_CHANNEL", "\"nightly\"")
