@@ -25,7 +25,8 @@ env:
   EXPECTED_SIGNER_SHA256: 4322294ed4caa2d4294140095818080ffe8acc1fbe3cdc76107df45c5286be40
   # Certificate of the nightly key. Every nightly must carry it so each one
   # installs over the previous nightly without an uninstall.
-  EXPECTED_NIGHTLY_SIGNER_SHA256: e42225b5ab3ac68236e54567ef0c4878afbafcdd3d438fbaba343e2d70425bf0
+  # Must be configured in this fork as a GitHub Actions variable, and is never the upstream key.
+  EXPECTED_NIGHTLY_SIGNER_SHA256: ${{ vars.NIGHTLY_SIGNER_SHA256 }}
 
 # checks, tests, lint and build run on separate runners at the same time, and
 # both publish jobs wait for all four. The CI Gradle properties replace the
@@ -201,6 +202,20 @@ jobs:
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
             echo "Release keystore secret is not available. Continuing with an unsigned CI build."
+          fi
+
+      - name: Validate personal nightly signing configuration
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          NIGHTLY_KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+        run: |
+          if ! [[ "$EXPECTED_NIGHTLY_SIGNER_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Set Actions variable NIGHTLY_SIGNER_SHA256 to the lowercase SHA-256 certificate fingerprint of your dedicated signing key."
+            exit 1
+          fi
+          if [ -z "$NIGHTLY_KEYSTORE_BASE64" ]; then
+            echo "::error::Set Actions secret NIGHTLY_KEYSTORE_BASE64 before publishing an installable nightly."
+            exit 1
           fi
 
       - name: Decode nightly keystore
