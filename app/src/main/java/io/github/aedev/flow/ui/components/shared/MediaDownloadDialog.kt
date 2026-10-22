@@ -32,7 +32,12 @@ fun MediaDownloadDialog(
     video: Video,
     subtitles: List<SubtitleOption> = emptyList(),
     onDismiss: () -> Unit,
+    isLive: Boolean = false,
 ) {
+    if (isLive) {
+        LiveRecordingDialog(video = video, onDismiss = onDismiss)
+        return
+    }
     val context = LocalContext.current
     val audioLangPref =
         remember(context) {
