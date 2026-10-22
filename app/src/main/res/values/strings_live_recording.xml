@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="live_recording_title">Record livestream</string>
+    <string name="live_recording_explanation">Record from the live edge until you stop. Only unencrypted HLS MPEG-TS broadcasts are supported. Saved recordings appear in Movies/My Flow as .ts video files. Keep enough free storage.</string>
+    <string name="live_recording_start">Start Recording</string>
+    <string name="live_recording_stop_save">Stop &amp; Save</string>
+    <string name="live_recording_channel">Livestream recording</string>
+    <string name="live_recording_notification">Recorded %1$d seconds · %2$d MB</string>
+    <string name="live_recording_progress">Recorded %1$d seconds · %2$d MB. You can stop from the notification.</string>
+    <string name="live_recording_other">Another livestream is recording. Stop it before starting this one.</string>
+    <string name="live_recording_saved">Saved to %1$s</string>
+</resources>
