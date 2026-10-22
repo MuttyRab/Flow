@@ -76,7 +76,12 @@ fun MediaDownloadDialogCompact(
     currentPlayingHeight: Int = 0,
     subtitles: List<SubtitleOption> = emptyList(),
     onDismiss: () -> Unit,
+    isLive: Boolean = false,
 ) {
+    if (isLive) {
+        LiveRecordingDialog(video = video, onDismiss = onDismiss)
+        return
+    }
     val context = LocalContext.current
     val separatorDot = stringResource(R.string.list_separator_dot)
     val hdrLabel = stringResource(R.string.download_quality_hdr)
