@@ -1,0 +1,79 @@
+name: Sync upstream Flow
+
+# Keep this personal fork current. A successful sync triggers the normal signed Android
+# build explicitly: pushes made with GITHUB_TOKEN don't trigger other workflows.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: flow-upstream-main-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream into personal fork
+    if: github.repository == 'MuttyRab/Flow'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the personal main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch official Flow changes
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/Flow-Tube/Flow.git
+          git fetch --no-tags upstream main
+
+      - name: Merge upstream without losing fork changes
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo 'No new upstream commits.'
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A regular merge preserves personal commits; never force-push or overwrite.
+          if ! git merge --no-edit --no-ff -m 'chore(sync): merge Flow-Tube/Flow main' upstream/main; then
+            git merge --abort || true
+            echo '::error::Upstream changes conflict with personal changes. Resolve the conflict before syncing again.'
+            exit 1
+          fi
+
+          # Fail closed if upstream overrides the personal app identity or signing policy.
+          grep -Fq 'MuttyRab/Flow' app/build.gradle.kts
+          grep -Fq 'nightly.mutty' app/build.gradle.kts
+          grep -Fq 'EXPECTED_NIGHTLY_SIGNER_SHA256: 037495da46ac51a791b33e4de287e435ab9c0c20075cd39bf69d762b720922fd' .github/workflows/build.yml
+          grep -Fq 'NIGHTLY_KEYSTORE_BASE64' .github/workflows/build.yml
+          grep -Fq 'NIGHTLY_STORE_PASSWORD' .github/workflows/build.yml
+
+          # Do not bypass concurrent updates to main: a rejected push is safe to retry.
+          git push origin HEAD:main
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Trigger the signed Android CI/CD release
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A GITHUB_TOKEN push does not trigger the push workflow. Explicitly
+          # dispatch it; the main-branch workflow runs all checks before release.
+          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main

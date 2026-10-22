@@ -26,7 +26,7 @@ updates for your personal build.
    The CI workflow uses the fixed alias `flow-personal` and the same password for the key.
    It pins this key's public SHA-256 certificate fingerprint in the workflow file:
    `037495da46ac51a791b33e4de287e435ab9c0c20075cd39bf69d762b720922fd`.
-3. Enable Actions on this fork if GitHub requests it. Push or merge a change to `main`;
+3. Enable Actions on this fork if GitHub requests it. Push or merge a change to `main` (or manually run **Android CI/CD** on `main`);
    the existing **Android CI/CD** workflow runs checks, unit tests, lint and an APK build.
    On success it publishes the rolling [personal nightly release](https://github.com/MuttyRab/Flow/releases/tag/nightly).
    The workflow deliberately refuses to publish if the signing key is absent or its fingerprint
@@ -55,3 +55,24 @@ different signing key, and GitHub's ephemeral debug key cannot be relied on for 
   The personal update workflow here intentionally uses the `nightly` channel.
 - In-app checking is subject to network access and update notification preferences; use the
   app's manual update check to check immediately.
+
+## Automatic upstream synchronization
+
+`.github/workflows/upstream-sync.yml` checks `Flow-Tube/Flow` every six hours.
+When new upstream commits exist, it merges upstream `main` into this fork's `main`
+without force-pushing or discarding personal changes. It verifies the personal app ID,
+update repository, signing fingerprint and signing inputs before pushing. An automatic
+sync explicitly dispatches **Android CI/CD** because GitHub doesn't trigger push
+workflows from commits pushed with `GITHUB_TOKEN`.
+
+Normal pushes to `main`, manual **Android CI/CD** runs on `main`, and upstream
+sync dispatches all publish the same signed rolling `nightly` release **only after**
+checks, tests, lint and APK build succeed.
+
+Important limitations: conflicting upstream changes or personal-signing identity
+changes stop the sync rather than overwriting your fork. GitHub CI errors stop
+publication, leaving the previous signed nightly available. This is a scheduled
+merge of upstream code, not a guarantee upstream code will always compile safely;
+automatic upstream code execution inherits the trust you place in Flow-Tube/Flow.
+The scheduled workflow is also available via **Actions → Sync upstream Flow → Run workflow**
+for an immediate sync.
