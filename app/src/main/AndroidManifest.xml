@@ -208,6 +208,12 @@
             </intent-filter>
         </activity>
         
+        <!-- Explicitly user-started live media capture. Kept separate from playback. -->
+        <service
+            android:name=".data.video.live.LiveRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Media3 Music Service -->
         <service
             android:name=".service.Media3MusicService"
