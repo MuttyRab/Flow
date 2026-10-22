@@ -3,7 +3,7 @@ package io.github.aedev.flow.data.video.live
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.UriUtil
-import androidx.media3.exoplayer.hls.playlist.HlsMasterPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
 import io.github.aedev.flow.network.ProxyAwareClient
@@ -75,7 +75,7 @@ internal class LiveHlsRecorder(
                         fetchToFile(UriUtil.resolve(playlistUrl, segment.url), segment.byteRangeOffset, segment.byteRangeLength, part)
                         if (!isTransportStream(part)) throw UnsupportedStream("This livestream is not MPEG-TS HLS")
                         if (output.length() + part.length() > MAX_BYTES) break
-                        output.outputStream(append = true).use { out -> part.inputStream().use { it.copyTo(out) } }
+                        java.io.FileOutputStream(output, true).use { out -> part.inputStream().use { it.copyTo(out) } }
                         part.delete()
                         discontinuity = segmentDiscontinuity
                         durationUs += segment.durationUs
@@ -102,7 +102,7 @@ internal class LiveHlsRecorder(
                         break // save the playable portion recorded before network failure
                     }
                     delay((errors * 1_500L).coerceAtMost(8_000L))
-                    manifestUrl = freshManifest() // refresh expired signed URLs
+                    manifestUrl = runCatching { freshManifest() }.getOrDefault(manifestUrl) // refresh expired signed URLs
                 }
             }
         } finally {
@@ -126,7 +126,7 @@ internal class LiveHlsRecorder(
             val playlist = HlsPlaylistParser().parse(Uri.parse(current), data.inputStream())
             when (playlist) {
                 is HlsMediaPlaylist -> return current to playlist
-                is HlsMasterPlaylist -> {
+                is HlsMultivariantPlaylist -> {
                     val best = playlist.variants.maxWithOrNull(compareBy({ it.format.height }, { it.format.bitrate }))
                         ?: throw UnsupportedStream("HLS master playlist has no variants")
                     current = UriUtil.resolve(playlist.baseUri, best.url.toString())
