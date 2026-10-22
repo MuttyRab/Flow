@@ -15,30 +15,22 @@ upstream Flow's signing certificate, reuse another app's key, or commit your key
 passwords or Base64 secrets to Git. Anyone possessing the private signing key can impersonate
 updates for your personal build.
 
-1. Create a Java keystore on a trusted computer (or use an existing dedicated key):
-   ```sh
-   keytool -genkeypair -keystore flow-personal-nightly.keystore -alias flow-personal \
-     -keyalg RSA -keysize 3072 -validity 36500
-   ```
-   Back up this file and its passwords offline. The key alias is `flow-personal`.
-2. Compute the certificate fingerprint, lowercase hex, **without colons**:
-   ```sh
-   keytool -list -v -keystore flow-personal-nightly.keystore -alias flow-personal
-   ```
-   Copy the `SHA256` fingerprint, remove `:`, and make it lowercase.
-3. In **MuttyRab/Flow → Settings → Secrets and variables → Actions**, add the repository
-   **variable** `NIGHTLY_SIGNER_SHA256` containing that 64-character fingerprint.
-4. Add four Actions **secrets**:
-   - `NIGHTLY_KEYSTORE_BASE64`: `base64 -w0 flow-personal-nightly.keystore` on Linux,
-     or `base64 < flow-personal-nightly.keystore | tr -d '\\n'` on macOS.
+1. Use the provided private signing backup (`flow-personal-signing-backup.zip`) and store it
+   securely offline. The contained keystore was generated specifically for your personal fork.
+   Do not upload either the keystore or password to the repository as ordinary files.
+2. In **MuttyRab/Flow → Settings → Secrets and variables → Actions → Repository secrets**,
+   use the values in `github-actions-secret-values.txt` from your private backup. You only
+   need these **two secrets**:
+   - `NIGHTLY_KEYSTORE_BASE64`: the complete Base64 encoding of the keystore.
    - `NIGHTLY_STORE_PASSWORD`: the keystore password.
-   - `NIGHTLY_KEY_ALIAS`: `flow-personal` (or your chosen alias).
-   - `NIGHTLY_KEY_PASSWORD`: the alias's key password.
-5. Enable Actions on this fork if GitHub requests it. Push or merge a change to `main`;
+   The CI workflow uses the fixed alias `flow-personal` and the same password for the key.
+   It pins this key's public SHA-256 certificate fingerprint in the workflow file:
+   `037495da46ac51a791b33e4de287e435ab9c0c20075cd39bf69d762b720922fd`.
+3. Enable Actions on this fork if GitHub requests it. Push or merge a change to `main`;
    the existing **Android CI/CD** workflow runs checks, unit tests, lint and an APK build.
    On success it publishes the rolling [personal nightly release](https://github.com/MuttyRab/Flow/releases/tag/nightly).
    The workflow deliberately refuses to publish if the signing key is absent or its fingerprint
-   does not match the pinned repository variable.
+   does not match the pinned public fingerprint.
 
 ## Install and future updates
 
