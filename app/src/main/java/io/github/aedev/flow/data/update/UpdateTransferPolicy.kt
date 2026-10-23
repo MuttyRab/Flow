@@ -22,6 +22,7 @@ internal object UpdateTransferPolicy {
         return start == startByte &&
             end >= start &&
             (remoteTotal == null || end < remoteTotal) &&
-            (expectedBytes <= 0L || remoteTotal == expectedBytes)
+            (expectedBytes <= 0L || remoteTotal == expectedBytes) &&
+            (expectedBytes <= 0L || end < expectedBytes)
     }
 }
