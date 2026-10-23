@@ -1,7 +1,5 @@
 package io.github.aedev.flow.updater
 
-import io.github.aedev.flow.data.update.UpdateTransferPolicy
-
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -19,6 +17,7 @@ import io.github.aedev.flow.MainActivity
 import io.github.aedev.flow.R
 import io.github.aedev.flow.data.update.UpdateEntryPoint
 import io.github.aedev.flow.data.update.UpdateFailure
+import io.github.aedev.flow.data.update.UpdateTransferPolicy
 import io.github.aedev.flow.notification.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
