@@ -54,13 +54,14 @@ class AppUpdateInstaller
 
         fun download(release: AppRelease) {
             val apk = release.apk ?: return
-            UpdateFiles.clean(context, keepVersion = null)
+            UpdateFiles.clean(context, keepVersion = release.version)
             val request =
                 OneTimeWorkRequestBuilder<UpdateDownloadWorker>()
                     .setInputData(
                         workDataOf(
                             UpdateDownloadWorker.KEY_URL to apk.url,
                             UpdateDownloadWorker.KEY_SHA256 to apk.sha256,
+                            UpdateDownloadWorker.KEY_SIZE to apk.sizeBytes,
                             UpdateDownloadWorker.KEY_VERSION to release.version,
                         ),
                     ).addTag(tagFor(release.version))
