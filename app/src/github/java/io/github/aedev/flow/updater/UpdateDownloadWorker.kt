@@ -1,5 +1,7 @@
 package io.github.aedev.flow.updater
 
+import io.github.aedev.flow.data.update.UpdateTransferPolicy
+
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
