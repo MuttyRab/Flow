@@ -99,6 +99,10 @@ class UpdateDownloadWorker(
                 .newBuilder()
                 .cache(null)
                 .readTimeout(2, TimeUnit.MINUTES)
+                // The app's shared HTTP client has a 60-second total call timeout. APK downloads
+                // can take much longer on slow networks, even while bytes keep arriving.
+                // Rely on the per-read timeout instead; WorkManager cancellation still works.
+                .callTimeout(0, TimeUnit.MILLISECONDS)
                 .build()
         val existing = target.takeIf { it.exists() }?.length() ?: 0L
         val offset = UpdateTransferPolicy.resumeOffset(existing, expectedBytes)
