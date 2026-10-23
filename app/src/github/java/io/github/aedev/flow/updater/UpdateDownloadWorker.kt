@@ -67,8 +67,10 @@ class UpdateDownloadWorker(
                 ) {
                     return@withContext fail(UpdateFailure.CHECKSUM, part)
                 }
-                if (!isFlowPackage(part)) return@withContext fail(UpdateFailure.PACKAGE, part)
-                if (!part.renameTo(UpdateFiles.apkFile(applicationContext, version))) return@withContext fail(UpdateFailure.STORAGE, part)
+                // Android's package parser expects an .apk file, not the .apk.part download name.
+                val apk = UpdateFiles.apkFile(applicationContext, version)
+                if (!part.renameTo(apk)) return@withContext fail(UpdateFailure.STORAGE, part)
+                if (!isFlowPackage(apk)) return@withContext fail(UpdateFailure.PACKAGE, apk)
                 notifyReady()
                 Result.success()
             } catch (e: IOException) {
