@@ -1,5 +1,7 @@
 package io.github.aedev.flow.updater
 
+import io.github.aedev.flow.data.update.UpdateTransferPolicy
+
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
