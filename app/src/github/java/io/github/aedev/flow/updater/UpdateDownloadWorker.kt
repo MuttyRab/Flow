@@ -106,7 +106,9 @@ class UpdateDownloadWorker(
                 .build()
         val existing = target.takeIf { it.exists() }?.length() ?: 0L
         val offset = UpdateTransferPolicy.resumeOffset(existing, expectedBytes)
-        if (existing > 0L && offset == 0L) target.delete()
+        if (existing > 0L && offset == 0L && !target.delete()) {
+            throw IOException("Unable to discard oversized partial APK")
+        }
         // A previous attempt might have received every byte before its connection failed.
         if (expectedBytes > 0L && offset == expectedBytes) return sha256(target)
 
@@ -120,14 +122,14 @@ class UpdateDownloadWorker(
         client.newCall(request).execute().use { response ->
             if (response.code == 416 && offset > 0L) {
                 // The server cannot resume this file. Start it over rather than retrying a bad range.
-                target.delete()
+                if (!target.delete()) throw IOException("Unable to restart rejected APK range")
                 return download(url, target, expectedBytes)
             }
             if (!response.isSuccessful) throw IOException("HTTP " + response.code)
             if (response.code == 206 &&
                 !UpdateTransferPolicy.acceptsPartialResponse(response.header("Content-Range"), offset, expectedBytes)
             ) {
-                target.delete()
+                if (!target.delete()) throw IOException("Unable to discard invalid APK range")
                 throw IOException("Invalid partial response")
             }
             // A server may ignore Range and return HTTP 200. Truncate, never append a full APK.
