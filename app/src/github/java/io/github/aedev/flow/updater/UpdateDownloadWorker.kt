@@ -17,15 +17,19 @@ import io.github.aedev.flow.MainActivity
 import io.github.aedev.flow.R
 import io.github.aedev.flow.data.update.UpdateEntryPoint
 import io.github.aedev.flow.data.update.UpdateFailure
+import io.github.aedev.flow.data.update.UpdateTransferPolicy
 import io.github.aedev.flow.notification.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import java.io.EOFException
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 private const val PROGRESS_NOTIFICATION_ID = 9998
 private const val READY_NOTIFICATION_ID = 9999
@@ -33,6 +37,7 @@ private const val BUFFER_SIZE = 64 * 1024
 private const val PROGRESS_STEP = 0.01f
 private const val PROGRESS_INTERVAL_MS = 250L
 private const val PERCENT = 100
+private const val MAX_NETWORK_ATTEMPTS = 4
 
 /**
  * Downloads one release APK in the foreground, hashing it as it arrives. The file is kept only if
@@ -51,28 +56,41 @@ class UpdateDownloadWorker(
         withContext(Dispatchers.IO) {
             val url = inputData.getString(KEY_URL) ?: return@withContext fail(UpdateFailure.NETWORK)
             val expectedSha = inputData.getString(KEY_SHA256)
+            val expectedBytes = inputData.getLong(KEY_SIZE, 0L)
             setForeground(foregroundInfo(null))
             val part = UpdateFiles.partFile(applicationContext, version)
             try {
-                val actualSha = download(url, part)
+                val actualSha = download(url, part, expectedBytes)
                 setProgress(workDataOf(KEY_PHASE to PHASE_VERIFY))
                 if (expectedSha != null &&
                     !expectedSha.equals(actualSha, ignoreCase = true)
                 ) {
                     return@withContext fail(UpdateFailure.CHECKSUM, part)
                 }
-                if (!isFlowPackage(part)) return@withContext fail(UpdateFailure.PACKAGE, part)
-                if (!part.renameTo(UpdateFiles.apkFile(applicationContext, version))) return@withContext fail(UpdateFailure.STORAGE, part)
+                // Android's package parser expects an .apk file, not the .apk.part download name.
+                val apk = UpdateFiles.apkFile(applicationContext, version)
+                if (!part.renameTo(apk)) return@withContext fail(UpdateFailure.STORAGE, part)
+                if (!isFlowPackage(apk)) return@withContext fail(UpdateFailure.PACKAGE, apk)
                 notifyReady()
                 Result.success()
             } catch (e: IOException) {
-                fail(if (e.message?.contains("ENOSPC") == true) UpdateFailure.STORAGE else UpdateFailure.NETWORK, part)
+                val storageFailure =
+                    generateSequence<Throwable>(e) { it.cause }.any { cause ->
+                        cause.message.orEmpty().contains("ENOSPC", ignoreCase = true) ||
+                            cause.message.orEmpty().contains("No space left", ignoreCase = true)
+                    }
+                when {
+                    storageFailure -> fail(UpdateFailure.STORAGE, part)
+                    runAttemptCount < MAX_NETWORK_ATTEMPTS - 1 -> Result.retry()
+                    else -> fail(UpdateFailure.NETWORK) // Retain the partial file for a manual retry.
+                }
             }
         }
 
     private suspend fun download(
         url: String,
         target: File,
+        expectedBytes: Long,
     ): String {
         val client =
             EntryPointAccessors
@@ -80,34 +98,92 @@ class UpdateDownloadWorker(
                 .okHttpClient()
                 .newBuilder()
                 .cache(null)
+                .readTimeout(2, TimeUnit.MINUTES)
+                // The app's shared HTTP client has a 60-second total call timeout. APK downloads
+                // can take much longer on slow networks, even while bytes keep arriving.
+                // Rely on the per-read timeout instead; WorkManager cancellation still works.
+                .callTimeout(0, TimeUnit.MILLISECONDS)
                 .build()
-        val digest = MessageDigest.getInstance("SHA-256")
-        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-            val total = response.body.contentLength().takeIf { it > 0 }
-            var read = 0L
+        val existing = target.takeIf { it.exists() }?.length() ?: 0L
+        val offset = UpdateTransferPolicy.resumeOffset(existing, expectedBytes)
+        if (existing > 0L && offset == 0L && !target.delete()) {
+            throw IOException("Unable to discard oversized partial APK")
+        }
+        // A previous attempt might have received every byte before its connection failed.
+        if (expectedBytes > 0L && offset == expectedBytes) return sha256(target)
+
+        val request =
+            Request
+                .Builder()
+                .url(url)
+                .header("Accept-Encoding", "identity")
+                .apply { if (offset > 0L) header("Range", "bytes=$offset-") }
+                .build()
+        client.newCall(request).execute().use { response ->
+            if (response.code == 416 && offset > 0L) {
+                // The server cannot resume this file. Start it over rather than retrying a bad range.
+                if (!target.delete()) throw IOException("Unable to restart rejected APK range")
+                return download(url, target, expectedBytes)
+            }
+            if (!response.isSuccessful) throw IOException("HTTP " + response.code)
+            if (response.code == 206 &&
+                !UpdateTransferPolicy.acceptsPartialResponse(response.header("Content-Range"), offset, expectedBytes)
+            ) {
+                if (!target.delete()) throw IOException("Unable to discard invalid APK range")
+                throw IOException("Invalid partial response")
+            }
+            // A server may ignore Range and return HTTP 200. Truncate, never append a full APK.
+            val append = offset > 0L && response.code == 206
+            val initialBytes = if (append) offset else 0L
+            val responseBytes = response.body.contentLength().takeIf { it >= 0L }?.let { it + initialBytes }
+            val total = expectedBytes.takeIf { it > 0L } ?: responseBytes
+            var received = initialBytes
             var reported = -1f
             var reportedAt = 0L
+            if (initialBytes > 0L && total != null && total > 0L) {
+                val progress = initialBytes.toFloat() / total
+                setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD, KEY_PROGRESS to progress))
+                setForeground(foregroundInfo(progress))
+            }
             response.body.byteStream().use { input ->
-                target.outputStream().use { output ->
+                FileOutputStream(target, append).use { output ->
                     val buffer = ByteArray(BUFFER_SIZE)
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val count = input.read(buffer)
                         if (count < 0) break
+                        if (count == 0) continue
                         output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
-                        read += count
-                        val progress = total?.let { read.toFloat() / it }
+                        received += count
+                        val progress = total?.takeIf { it > 0L }?.let { received.toFloat() / it }
                         val now = System.currentTimeMillis()
                         if (progress != null && progress - reported >= PROGRESS_STEP && now - reportedAt >= PROGRESS_INTERVAL_MS) {
                             reported = progress
                             reportedAt = now
-                            setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD, KEY_PROGRESS to progress))
-                            setForeground(foregroundInfo(progress))
+                            setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD, KEY_PROGRESS to progress.coerceIn(0f, 1f)))
+                            setForeground(foregroundInfo(progress.coerceIn(0f, 1f)))
                         }
                     }
                 }
+            }
+            if (expectedBytes > 0L && received != expectedBytes) {
+                throw EOFException("Incomplete APK: received $received of $expectedBytes bytes")
+            }
+            if (responseBytes != null && received != responseBytes) {
+                throw EOFException("Incomplete response: received $received of $responseBytes bytes")
+            }
+        }
+        return sha256(target)
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
@@ -171,6 +247,7 @@ class UpdateDownloadWorker(
     companion object {
         const val KEY_URL = "url"
         const val KEY_SHA256 = "sha256"
+        const val KEY_SIZE = "size"
         const val KEY_VERSION = "version"
         const val KEY_PHASE = "phase"
         const val KEY_PROGRESS = "progress"
@@ -201,7 +278,8 @@ internal object UpdateFiles {
         context: Context,
         keepVersion: String?,
     ) {
-        val keep = keepVersion?.let { apkFile(context, it).name }
-        directory(context).listFiles()?.filter { it.name != keep }?.forEach { it.delete() }
+        val keep =
+            keepVersion?.let { setOf(apkFile(context, it).name, partFile(context, it).name) }.orEmpty()
+        directory(context).listFiles()?.filter { it.name !in keep }?.forEach { it.delete() }
     }
 }
